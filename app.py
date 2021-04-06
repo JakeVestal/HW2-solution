@@ -5,7 +5,8 @@ import plotly.graph_objects as go
 import dash_core_components as dcc
 import dash_html_components as html
 from hw2_utils import *
-from datetime import date
+from datetime import date, timedelta
+from math import ceil
 from model import *
 
 # 4) Create a Dash app
@@ -13,42 +14,119 @@ app = dash.Dash(__name__)
 
 # 5) Create the page layout
 app.layout = html.Div([
-    # Hidden div inside the app that stores bond features from model
-    html.Div(id='model-output', style={'display': 'none'}),
-    # Hidden div inside the app that stores IVV price data
-    html.Div(id='ivv-historical-data', style={'display': 'none'}),
+    ##### Intermediate Variables (hidden in divs as JSON) ######################
+    ############################################################################
+    # Hidden div inside the app that stores IVV historical data
+    html.Div(id='ivv-hist', style={'display': 'none'}),
+    # Hidden div inside the app that stores bonds historical data
+    html.Div(id='bonds-hist', style={'display': 'none'}),
+    # Hidden div inside the app that stores model features output
+    html.Div(id='features', style={'display': 'none'}),
+    # Hidden div inside the app that stores historical model response
+    html.Div(id='response', style={'display': 'none'}),
+    # Hidden div inside the app that stores the blotter backtest
+    html.Div(id='blotter', style={'display': 'none'}),
+    # Hidden div inside the app that stores the ledger backtest
+    html.Div(id='ledger', style={'display': 'none'}),
+    ############################################################################
+    ############################################################################
+
+    ##### Parameters ###########################################################
+    ############################################################################
     # Date range for update historical data
     dcc.DatePickerRange(
-        id='ivv-historical-data-range',
+        id='hist-data-range',
         min_date_allowed=date(2015, 1, 1),
         max_date_allowed=date.today(),
         initial_visible_month=date.today(),
         start_date=date(2021, 3, 26),
         end_date=date.today()
     ),
-    html.Div(id='output-container-date-picker-range'),
+    # Identifier for what asset to fetch from Bloomberg (IVV US Equity)
     dcc.Input(id='bbg-identifier-1', type = "text", value = "IVV US Equity"),
-    html.Button("UPDATE", id='update-hist-dta-button', n_clicks = 0),
-    # Hidden div inside the app that stores bonds rates data
-    html.Div(id='bonds-historical-data', style={'display': 'none'}),
-    dcc.Input(id="exit-position-n", type="number", debounce=True, value=5),
-    dcc.Input(id="alpha", type="number", debounce=True, value=0.02),
-    dcc.Graph(id='bonds-3d-graph', style={'display': 'none'})
+    # Little 'n': how long for strategy to be profitable? (days)
+    dcc.Input(id='n', type = "number", value = 5),
+    # Alpha: the profitability threshold
+    dcc.Input(id="alpha", type="number", value=0.02),
+    ############################################################################
+    ############################################################################
+    # Display the current selected date range
+    html.Div(id='date-range-output'),
+    dcc.Graph(id='bonds-3d-graph', style={'display': 'none'}),
+    dcc.Graph(id='candlestick', style={'display': 'none'}),
+    html.Div(id='proposed-trade'),
+    ############################################################################
+    ############################################################################
+
+    ##### Buttons ##############################################################
+    ############################################################################
+    html.Button("RUN BACKTEST", id='run-backtest', n_clicks=0),
+    html.Button("PLACE TRADE", id='place-trade', n_clicks=0)
+    ############################################################################
+    ############################################################################
 ])
 
+#### Update Historical Bloomberg Data
 @app.callback(
-    [dash.dependencies.Output('bonds-historical-data', 'children'),
+    [dash.dependencies.Output('ivv-hist', 'children'),
+    dash.dependencies.Output('date-range-output', 'children'),
+    dash.dependencies.Output('candlestick', 'figure'),
+    dash.dependencies.Output('candlestick', 'style')],
+    dash.dependencies.Input("run-backtest", 'n_clicks'),
+    [dash.dependencies.State("n", "value"),
+    dash.dependencies.State("bbg-identifier-1", "value"),
+    dash.dependencies.State('hist-data-range', 'start_date'),
+    dash.dependencies.State('hist-data-range', 'end_date')],
+    prevent_initial_call = True
+)
+def update_bbg_data(nclicks, n, bbg_id_1, start_date, end_date):
+
+    # Need to query enough days to run the backtest on every date in the
+    # range start_date to end_date
+    start_date = pd.to_datetime(start_date).date() - timedelta(days=ceil(n * 365 / 252))
+    print(start_date)
+    start_date = start_date.strftime("%Y-%m-%d")
+    print(start_date)
+
+    historical_data = req_historical_data(bbg_id_1, start_date, end_date)
+
+    date_output_msg = 'Backtesting from : '
+
+    if start_date is not None:
+        start_date_object = date.fromisoformat(start_date)
+        start_date_string = start_date_object.strftime('%B %d, %Y')
+        date_output_msg = date_output_msg + 'Start Date: ' + start_date_string
+
+    if end_date is not None:
+        end_date_object = date.fromisoformat(end_date)
+        end_date_string = end_date_object.strftime('%B %d, %Y')
+        date_output_msg = date_output_msg + 'End Date: ' + end_date_string
+    if len(date_output_msg) == len('You have selected: '):
+        date_output_msg = 'Select a date to see it displayed here'
+
+    print(historical_data)
+
+    fig = go.Figure(
+        data=[go.Candlestick(x=historical_data['Date'],
+                                         open=historical_data['Open'],
+                                         high=historical_data['High'],
+                                         low=historical_data['Low'],
+                                         close=historical_data['Close'])]
+    )
+
+    return historical_data.to_json(), date_output_msg, fig, {'display': 'block'}
+
+
+@app.callback(
+    [dash.dependencies.Output('bonds-hist', 'children'),
     dash.dependencies.Output('bonds-3d-graph', 'figure'),
     dash.dependencies.Output('bonds-3d-graph', 'style')],
-    dash.dependencies.Input("update-hist-dta-button", 'n_clicks'),
-    [dash.dependencies.State('ivv-historical-data-range', 'start_date'),
-     dash.dependencies.State('ivv-historical-data-range', 'end_date')],
+    dash.dependencies.Input("run-backtest", 'n_clicks'),
+    [dash.dependencies.State('hist-data-range', 'start_date'),
+     dash.dependencies.State('hist-data-range', 'end_date')],
     prevent_initial_call=True
 )
-def update_bonds_data(n_clicks, startDate, endDate):
-    # from hw2_utils import *
-    # startDate = "2019-03-26"
-    # endDate = "2021-03-30"
+def update_bonds_hist(n_clicks, startDate, endDate):
 
     data_years = list(
         range(pd.to_datetime(startDate).date().year,
@@ -81,7 +159,6 @@ def update_bonds_data(n_clicks, startDate, endDate):
         ]
     )
 
-
     fig.update_layout(
         scene=dict(
             xaxis_title='Maturity (years)',
@@ -97,40 +174,24 @@ def update_bonds_data(n_clicks, startDate, endDate):
 
     return bonds_data.to_json(), fig, {'display': 'block'}
 
-@app.callback(
-    [dash.dependencies.Output('ivv-historical-data', 'children'),
-    dash.dependencies.Output('output-container-date-picker-range', 'children')],
-    dash.dependencies.Input("update-hist-dta-button", 'n_clicks'),
-    [dash.dependencies.State("bbg-identifier-1", "value"),
-    dash.dependencies.State('ivv-historical-data-range', 'start_date'),
-    dash.dependencies.State('ivv-historical-data-range', 'end_date')],
-    prevent_initial_call = True
-)
-def update_historical_data(nclicks, bbg_id_1, start_date, end_date):
-    historical_data = req_historical_data(bbg_id_1, start_date, end_date)
-    string_prefix = 'You have selected: '
-    if start_date is not None:
-        start_date_object = date.fromisoformat(start_date)
-        start_date_string = start_date_object.strftime('%B %d, %Y')
-        string_prefix = string_prefix + 'Start Date: ' + start_date_string + ' | '
-    if end_date is not None:
-        end_date_object = date.fromisoformat(end_date)
-        end_date_string = end_date_object.strftime('%B %d, %Y')
-        string_prefix = string_prefix + 'End Date: ' + end_date_string
-    if len(string_prefix) == len('You have selected: '):
-        string_prefix = 'Select a date to see it displayed here'
-    return historical_data.to_json(), string_prefix
 
 @app.callback(
-    dash.dependencies.Output('model-output', 'children'),
-    [dash.dependencies.Input('bonds-historical-data', 'children'),
-     dash.dependencies.Input('ivv-historical-data', 'children'),
-     dash.dependencies.Input('exit-position-n', 'value'),
-     dash.dependencies.Input('alpha', 'value')],
+    dash.dependencies.Output('features', 'children'),
+    dash.dependencies.Input('bonds-hist', 'children'),
     prevent_initial_call = True
 )
-def calculate_model_data(bonds, ivv, n, alpha):
-    return model_data(bonds, ivv, n, alpha)
+def calculate_features(bonds):
+    return calc_features(bonds)
+
+@app.callback(
+    dash.dependencies.Output('response', 'children'),
+    [dash.dependencies.Input('ivv-hist', 'children'),
+    dash.dependencies.Input('alpha', 'value'),
+    dash.dependencies.Input('n', 'value')],
+    prevent_initial_call = True
+)
+def calculate_response(ivv_hist, alpha, n):
+    return calc_response(ivv_hist, alpha, n)
 
 # Run it!
 if __name__ == '__main__':
