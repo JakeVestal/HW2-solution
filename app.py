@@ -8,6 +8,7 @@ from hw2_utils import *
 from datetime import date, timedelta
 from math import ceil
 from model import *
+from backtest import *
 
 # 4) Create a Dash app
 app = dash.Dash(__name__)
@@ -39,15 +40,19 @@ app.layout = html.Div([
         min_date_allowed=date(2015, 1, 1),
         max_date_allowed=date.today(),
         initial_visible_month=date.today(),
-        start_date=date(2021, 3, 26),
+        start_date=date(2021, 3, 16),
         end_date=date.today()
     ),
     # Identifier for what asset to fetch from Bloomberg (IVV US Equity)
     dcc.Input(id='bbg-identifier-1', type = "text", value = "IVV US Equity"),
     # Little 'n': how long for strategy to be profitable? (days)
-    dcc.Input(id='n', type = "number", value = 5),
+    dcc.Input(id='lil-n', type = "number", value = 3),
+    # Big 'N': How long to train model? (days)
+    dcc.Input(id='big-N', type="number", value=5),
     # Alpha: the profitability threshold
     dcc.Input(id="alpha", type="number", value=0.02),
+    # lot-size: how many shares to trade?
+    dcc.Input(id="lot-size", type="number", value=100),
     ############################################################################
     ############################################################################
     # Display the current selected date range
@@ -65,28 +70,19 @@ app.layout = html.Div([
     ############################################################################
     ############################################################################
 ])
-
-#### Update Historical Bloomberg Data
 @app.callback(
+#### Update Historical Bloomberg Data
     [dash.dependencies.Output('ivv-hist', 'children'),
     dash.dependencies.Output('date-range-output', 'children'),
     dash.dependencies.Output('candlestick', 'figure'),
     dash.dependencies.Output('candlestick', 'style')],
     dash.dependencies.Input("run-backtest", 'n_clicks'),
-    [dash.dependencies.State("n", "value"),
-    dash.dependencies.State("bbg-identifier-1", "value"),
+    [dash.dependencies.State("bbg-identifier-1", "value"),
     dash.dependencies.State('hist-data-range', 'start_date'),
     dash.dependencies.State('hist-data-range', 'end_date')],
     prevent_initial_call = True
 )
-def update_bbg_data(nclicks, n, bbg_id_1, start_date, end_date):
-
-    # Need to query enough days to run the backtest on every date in the
-    # range start_date to end_date
-    start_date = pd.to_datetime(start_date).date() - timedelta(days=ceil(n * 365 / 252))
-    print(start_date)
-    start_date = start_date.strftime("%Y-%m-%d")
-    print(start_date)
+def update_bbg_data(nclicks, bbg_id_1, start_date, end_date):
 
     historical_data = req_historical_data(bbg_id_1, start_date, end_date)
 
@@ -123,10 +119,16 @@ def update_bbg_data(nclicks, n, bbg_id_1, start_date, end_date):
     dash.dependencies.Output('bonds-3d-graph', 'style')],
     dash.dependencies.Input("run-backtest", 'n_clicks'),
     [dash.dependencies.State('hist-data-range', 'start_date'),
-     dash.dependencies.State('hist-data-range', 'end_date')],
+     dash.dependencies.State('hist-data-range', 'end_date'),
+     dash.dependencies.State('big-N', 'value')],
     prevent_initial_call=True
 )
-def update_bonds_hist(n_clicks, startDate, endDate):
+def update_bonds_hist(n_clicks, startDate, endDate, N):
+
+    # Need to query enough days to run the backtest on every date in the
+    # range start_date to end_date
+    startDate = pd.to_datetime(startDate).date() - timedelta(days=ceil(N * 365 / 252))
+    startDate = startDate.strftime("%Y-%m-%d")
 
     data_years = list(
         range(pd.to_datetime(startDate).date().year,
@@ -187,11 +189,29 @@ def calculate_features(bonds):
     dash.dependencies.Output('response', 'children'),
     [dash.dependencies.Input('ivv-hist', 'children'),
     dash.dependencies.Input('alpha', 'value'),
-    dash.dependencies.Input('n', 'value')],
+    dash.dependencies.Input('lil-n', 'value')],
     prevent_initial_call = True
 )
 def calculate_response(ivv_hist, alpha, n):
     return calc_response(ivv_hist, alpha, n)
+
+@app.callback(
+    dash.dependencies.Output('blotter', 'children'),
+    [dash.dependencies.Input('features', 'children'),
+     dash.dependencies.Input('response', 'children'),
+     dash.dependencies.Input('ivv-hist', 'children'),
+     dash.dependencies.Input('lil-n', 'value'),
+     dash.dependencies.Input('big-N', 'value'),
+     dash.dependencies.Input('alpha', 'value'),
+     dash.dependencies.Input('lot-size', 'value'),
+     dash.dependencies.State('hist-data-range', 'start_date'),
+     dash.dependencies.State('hist-data-range', 'end_date')],
+    prevent_initial_call = True
+)
+def calculate_backtest(features, response, ivv_data, n, N, alpha, lot_size,
+                       start_date, end_date):
+    return backtest(features, response, ivv_data, n, N, alpha, lot_size,
+                    start_date, end_date)
 
 # Run it!
 if __name__ == '__main__':
