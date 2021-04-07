@@ -1,5 +1,7 @@
 # SimpleHistoryExample.py
 from hw2_utils import *
+from bloomberg_functions import *
+import pickle
 
 def main():
     options = parseCmdLine()
@@ -80,6 +82,7 @@ if __name__ == "__main__":
     print("SimpleHistoryExample")
     try:
         hd = main()
+
         print(hd)
     except KeyboardInterrupt:
         print("Ctrl+C pressed. Stopping...")

@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from math import ceil
 from model import *
 from backtest import *
+from bloomberg_functions import req_historical_data
 
 # 4) Create a Dash app
 app = dash.Dash(__name__)
@@ -46,9 +47,9 @@ app.layout = html.Div([
     # Identifier for what asset to fetch from Bloomberg (IVV US Equity)
     dcc.Input(id='bbg-identifier-1', type = "text", value = "IVV US Equity"),
     # Little 'n': how long for strategy to be profitable? (days)
-    dcc.Input(id='lil-n', type = "number", value = 3),
+    dcc.Input(id='lil-n', type = "number", value=5),
     # Big 'N': How long to train model? (days)
-    dcc.Input(id='big-N', type="number", value=5),
+    dcc.Input(id='big-N', type="number", value=10),
     # Alpha: the profitability threshold
     dcc.Input(id="alpha", type="number", value=0.02),
     # lot-size: how many shares to trade?
@@ -78,11 +79,20 @@ app.layout = html.Div([
     dash.dependencies.Output('candlestick', 'style')],
     dash.dependencies.Input("run-backtest", 'n_clicks'),
     [dash.dependencies.State("bbg-identifier-1", "value"),
-    dash.dependencies.State('hist-data-range', 'start_date'),
-    dash.dependencies.State('hist-data-range', 'end_date')],
+     dash.dependencies.State("big-N", "value"),
+     dash.dependencies.State("lil-n", "value"),
+     dash.dependencies.State('hist-data-range', 'start_date'),
+     dash.dependencies.State('hist-data-range', 'end_date')],
     prevent_initial_call = True
 )
-def update_bbg_data(nclicks, bbg_id_1, start_date, end_date):
+def update_bbg_data(nclicks, bbg_id_1, N, n, start_date, end_date):
+
+    # Need to query enough days to run the backtest on every date in the
+    # range start_date to end_date
+    start_date = pd.to_datetime(start_date).date() - timedelta(
+        days=ceil((N+n)*(365/252))
+    )
+    start_date = start_date.strftime("%Y-%m-%d")
 
     historical_data = req_historical_data(bbg_id_1, start_date, end_date)
 
@@ -120,14 +130,18 @@ def update_bbg_data(nclicks, bbg_id_1, start_date, end_date):
     dash.dependencies.Input("run-backtest", 'n_clicks'),
     [dash.dependencies.State('hist-data-range', 'start_date'),
      dash.dependencies.State('hist-data-range', 'end_date'),
-     dash.dependencies.State('big-N', 'value')],
+     dash.dependencies.State('big-N', 'value'),
+     dash.dependencies.State('lil-n', 'value')
+    ],
     prevent_initial_call=True
 )
-def update_bonds_hist(n_clicks, startDate, endDate, N):
+def update_bonds_hist(n_clicks, startDate, endDate, N, n):
 
     # Need to query enough days to run the backtest on every date in the
     # range start_date to end_date
-    startDate = pd.to_datetime(startDate).date() - timedelta(days=ceil(N * 365 / 252))
+    startDate = pd.to_datetime(startDate).date() - timedelta(
+        days=ceil((N+n)*(365/252))
+    )
     startDate = startDate.strftime("%Y-%m-%d")
 
     data_years = list(
