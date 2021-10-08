@@ -173,6 +173,9 @@ def fetch_usdt_rates(YYYY):
 def Y_m_d_to_unix_str(ymd_str):
     return str(int(time.mktime(pd.to_datetime(ymd_str).date().timetuple())))
 
+def date_to_str(date_obj, format = "%Y-%m-%d"):
+    return date.strftime(pd.to_datetime(date_obj).date(), format)
+
 def fetch_GSPC_data(start_date, end_date):
     # Requests the USDT's daily yield data for a given year. Results are
     #   returned as a DataFrame object with the 'Date' column formatted as a
